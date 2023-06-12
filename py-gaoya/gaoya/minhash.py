@@ -223,6 +223,32 @@ class MinHashStringIndex:
         else:
             self.minhash_index.par_bulk_insert_docs(ids, docs)
 
+    def par_bulk_insert_query_docs(self, ids: List[int], docs: List[str]):
+        """
+        Inserts a batch of documents.
+        Then searches the index for documents similar to the inserted `docs`.
+        This method will use multiple cores to insert a batch of
+        documents into the index and then query them.
+
+        Parameters
+        ----------
+        ids: list
+            List of ids
+
+        docs: list
+            List of strings
+
+        Returns:
+        ----------
+        List Lists of ids or list of lists of tuples
+        """
+        if callable(self.analyzer):
+            raise NotImplementedError("par_bulk_insert_query_docs is not implemented for callable analyzer")
+        else:
+            return self.minhash_index.par_bulk_insert_query_docs(ids, docs)
+
+
+
     def remove(self, id: int):
         """
         Removes id from the index.

@@ -212,6 +212,15 @@ macro_rules! py_minhash_index {
             }
 
 
+            pub fn par_bulk_insert_query_docs(&mut self, ids: Vec<i64>, docs: Vec<&str>) -> Vec<Vec<i64>> {
+                let signatures = self.bulk_hash_docs(docs);
+                self.inner.par_bulk_insert_query(ids, signatures)
+                    .into_iter()
+                    .map(|set| set.into_iter().collect())
+                    .collect()
+            }
+
+
             pub fn size(&self) -> usize {
                 self.inner.size()
             }

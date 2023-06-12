@@ -650,6 +650,36 @@ where
         ids_distances[0..std::cmp::min(ids_distances.len(), k)].to_vec()
     }
 
+
+    pub fn par_bulk_insert_query(&mut self, ids: Vec<Id>, signatures: Vec<Vec<T>>)
+        -> Vec<HashSet<Id>>
+    where
+        Id: Hash + Eq + Clone + Send + Sync,
+        T: Send + Sync,
+    {
+        if !signatures.is_empty() {
+            assert_eq!(self.num_hashes(), signatures[0].len());
+        }
+
+        self.bands.par_iter_mut().for_each(|band| {
+            for item in signatures.iter().zip(ids.iter()) {
+                let hashes = item.0;
+                let id = item.1.clone();
+                band.insert(id, hashes);
+            }
+        });
+
+        for id_hash in ids.into_iter().zip(signatures.iter()) {
+            let hashes = id_hash.1.clone();
+            self.id_signatures.insert(id_hash.0, hashes);
+        }
+
+        signatures.par_iter()
+            .map(|signature| self.query_owned(signature))
+            .collect()
+    }
+
+
     /// Removes a key from the index, returning true if the key
     /// was previously in the index.
     ///
