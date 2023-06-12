@@ -340,7 +340,7 @@ impl<T, Id> MinHashIndex<T, Id>
 {
     /// Create a new MinHashIndex
     pub fn new(num_bands: usize, band_width: usize, jaccard_threshold: f64) -> Self {
-        MinHashIndex::<T, Id, HashSetContainer<Id>>::new_index(num_bands, band_width, jaccard_threshold)
+        MinHashIndex::<T, Id, HashSetContainer<Id>>::new_index(num_bands, band_width, jaccard_threshold, -1)
     }
 }
 
@@ -352,14 +352,24 @@ where
     C: IdContainer<Id>
 {
     /// Create a new MinHashIndex
-    pub fn new_index(num_bands: usize, band_width: usize, jaccard_threshold: f64) -> Self {
-        let build_hasher = RandomState::new();
+    pub fn new_index(num_bands: usize,
+                     band_width: usize,
+                     jaccard_threshold: f64,
+                     band_id: isize) -> Self {
+        let build_hasher = RandomState::with_seed(42);
         let mut bands = Vec::new();
-        for i in 0..num_bands {
-            let (start, end) = (i * band_width, (i + 1) * band_width);
+        if band_id < 0 {
+            for i in 0..num_bands {
+                let (start, end) = (i * band_width, (i + 1) * band_width);
+                bands.push(MinHashBand::<T, Id, C>::new(start, end, build_hasher.clone()));
+            }
+        } else {
+            // Index with only one of all possible bands for partitioned indexing
+            let uband_id: usize = band_id.try_into().unwrap();
+            let (start, end) = (uband_id * band_width, (uband_id + 1) * band_width);
             bands.push(MinHashBand::<T, Id, C>::new(start, end, build_hasher.clone()));
         }
-        let mut hash_table = HashMap::with_hasher(ahash::RandomState::new());
+        let mut hash_table = HashMap::with_hasher(ahash::RandomState::with_seed(42));
         hash_table.reserve(1000);
         MinHashIndex {
             bands,

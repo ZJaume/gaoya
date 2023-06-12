@@ -36,7 +36,8 @@ macro_rules! py_minhash_index {
                 num_hashes = "126",
                 analyzer = "\"word\"",
                 lowercase = "false",
-                ngram_range = "(1,1)"
+                ngram_range = "(1,1)",
+                band_id = "-1",
             )]
             pub fn new(
                 jaccard_threshold: f64,
@@ -46,10 +47,11 @@ macro_rules! py_minhash_index {
                 analyzer: Option<&str>,
                 lowercase: Option<bool>,
                 ngram_range: Option<(usize, usize)>,
+                band_id: Option<isize>,
             ) -> PyResult<Self> {
                 if let (Some(num_bands), Some(band_width)) = (num_bands, band_width) {
                     let index = $name {
-                        inner: gaoya::minhash::MinHashIndex::<_, _, $container_type>::new_index(num_bands, band_width, jaccard_threshold),
+                        inner: gaoya::minhash::MinHashIndex::<_, _, $container_type>::new_index(num_bands, band_width, jaccard_threshold, band_id.unwrap()),
                         min_hash: $minhash::new(num_bands * band_width),
                         tokenizer: TokenizerSpecification::new(analyzer.unwrap_or("word"), ngram_range),
                         lowercase: lowercase.unwrap_or(false),
@@ -59,7 +61,7 @@ macro_rules! py_minhash_index {
                 if let Some(num_hashes) = num_hashes {
                     let (num_bands, band_width) = calculate_minhash_params(jaccard_threshold, num_hashes);
                     let index = $name {
-                        inner: gaoya::minhash::MinHashIndex::<_,_, $container_type>::new_index(num_bands, band_width, jaccard_threshold),
+                        inner: gaoya::minhash::MinHashIndex::<_,_, $container_type>::new_index(num_bands, band_width, jaccard_threshold, band_id.unwrap()),
                         min_hash: $minhash::new(num_bands * band_width),
                         tokenizer: TokenizerSpecification::new(analyzer.unwrap_or("word"), ngram_range),
                         lowercase: lowercase.unwrap_or(false),
