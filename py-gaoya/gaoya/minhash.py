@@ -53,6 +53,12 @@ class MinHashStringIndex:
         only bigrams.
         Only applies if `analyzer` is not callable.
 
+    band_id : int, default=-1
+        Create a MinHashIndex that only stores one of the all possible bands.
+        The band_id specifies which band to store. The value must be between 0
+        and num_bands-1. In case a negative value is given, store all the bands.
+        Like the default behaviour.
+
     id_container: str, default="set"
         The data structure used as a bucket to hold ids of documents.
         When efficient removals required use set.
@@ -90,6 +96,7 @@ class MinHashStringIndex:
                  analyzer='word',
                  lowercase=False,
                  ngram_range=None,
+                 band_id=-1,
                  id_container='set'):
         if hash_size not in [8, 16, 32, 64]:
             raise ValueError(f"Invalid hash_size {hash_size}. hash_size must be on of 8, 16, 32 or 64")
@@ -97,6 +104,8 @@ class MinHashStringIndex:
             raise ValueError(f"Jaccard threshold must be between 0 and 1")
         if id_container not in ("set", "vec", "smallvec"):
             raise ValueError(f"id_container must be one of ('set', 'vec', 'smallvec')")
+        if band_id >= num_bands:
+            raise ValueError("band_id must be between 0 and num_bands -1")
         self.analyzer = analyzer
         # if analyzer is callable we need to pass something to index's constructor.
         analyzer = 'word' if callable(self.analyzer) else analyzer
@@ -125,7 +134,7 @@ class MinHashStringIndex:
         }
 
         type = constructors[hash_size][id_container]
-        self.minhash_index = type(jaccard_threshold, num_bands, band_size, num_hashes, analyzer, lowercase, ngram_range)
+        self.minhash_index = type(jaccard_threshold, num_bands, band_size, num_hashes, analyzer, lowercase, ngram_range, band_id)
 
     def insert_document(self, id, doc):
         """
