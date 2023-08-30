@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::hash::{BuildHasher, Hash};
 use std::ops::Index;
 use std::slice::Iter;
+use std::iter::Iterator;
 use smallvec::{Array, SmallVec};
 use crate::minhash::MinHashType;
 
@@ -68,10 +69,20 @@ impl<T: Hash + Eq + Send + Sync + Clone> IdContainer<T> for HashSetContainer<T> 
     fn remove(&mut self, item: &T) {
         self.set.remove(item);
     }
+
 }
 
+impl<T: Hash + Eq + Send + Sync + Clone> IntoIterator for HashSetContainer<T> {
+    type Item = T;
+    type IntoIter = std::collections::hash_set::IntoIter<T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.set.into_iter()
+    }
+}
+
+
 pub struct VecContainer<T> {
-    vec: Vec<T>
+    pub vec: Vec<T>
 }
 
 impl<T: Hash + Eq + Send + Sync + Clone> IdContainer<T> for  VecContainer<T> {
@@ -98,11 +109,18 @@ impl<T: Hash + Eq + Send + Sync + Clone> IdContainer<T> for  VecContainer<T> {
     }
 
 
-
     fn remove(&mut self, item: &T) {
         if let Some(index) =  self.vec.iter().position(|x| x == item) {
             self.vec.swap_remove(index);
         }
+    }
+}
+
+impl<T: Hash + Eq + Send + Sync + Clone> IntoIterator for VecContainer<T> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.vec.into_iter()
     }
 }
 
@@ -134,7 +152,6 @@ impl<T: Hash + Eq + Send + Sync + Clone, const N: usize> IdContainer<T> for Smal
     fn copy_refs_to<'a, S: BuildHasher>(&'a self, container: &mut HashSet<&'a T, S>) {
         container.extend(self.vec.iter())
     }
-
 
 
     fn remove(&mut self, item: &T) {
