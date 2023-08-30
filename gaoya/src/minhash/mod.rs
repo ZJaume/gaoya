@@ -15,6 +15,7 @@ pub use self::min_hasher::MinHasher8;
 pub use self::min_hasher::MinHasher16;
 pub use self::min_hasher::MinHasher32;
 pub use self::minhash_index::MinHashIndex;
+pub use self::minhash_index::MinHashDeduper;
 pub use self::string_index::MinHashStringIndex;
 pub use self::id_container::IdContainer;
 pub use self::id_container::HashSetContainer;

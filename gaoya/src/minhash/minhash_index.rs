@@ -15,7 +15,8 @@ use std::ops::{Index, Range};
 use ahash::{AHasher, AHashMap, AHashSet, RandomState};
 use itertools::Itertools;
 use crate::clustering::QueryIndex;
-use crate::minhash::id_container::{HashSetContainer, IdContainer};
+use crate::minhash::id_container::{HashSetContainer, IdContainer, VecContainer};
+use crate::unionfind::UnionFind;
 
 
 /// BandKey contains the hash of the band.
@@ -812,6 +813,243 @@ where
 
 }
 
+
+/// Data Structure to index minhashes into bands and extract nearduplicates disjoint-set
+///
+/// This is a copy of MinHashIndex without storing the <id, signatures> collection. This has
+/// a new method callded `find_clusters` that goes over all the bands and computes the
+/// near-duplicates disjoint-set with union-find.
+///
+/// 
+///
+pub struct MinHashDeduper<T>
+where
+    T: MinHashType,
+{
+    bands: Vec<MinHashBand<T, usize, VecContainer<usize>>>,
+    threshold: f64,
+    r: usize,
+    b: usize,
+    num_hashes: usize,
+    size: usize,
+}
+
+impl<T> fmt::Display for MinHashDeduper<T>
+where
+    T: MinHashType,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "MinHashDeduper<{}> {{ threshold = {}, num_hashes = {}, bands = {}, rows_per_band = {}, size = {} }}",
+               type_name::<T>(),
+               self.threshold, self.b * self.r, self.b, self.r, self.size)
+    }
+}
+
+impl<T> MinHashDeduper<T>
+where
+    T: MinHashType,
+{
+    /// Create a new MinHashDeduper
+    pub fn new_index(num_bands: usize,
+                     band_width: usize,
+                     jaccard_threshold: f64,
+                     band_id: isize) -> Self {
+        let build_hasher = RandomState::with_seed(42);
+        let mut bands = Vec::new();
+        if band_id < 0 {
+            for i in 0..num_bands {
+                let (start, end) = (i * band_width, (i + 1) * band_width);
+                bands.push(MinHashBand::<T, usize, VecContainer<usize>>::new(start, end, build_hasher.clone()));
+            }
+        } else {
+            // Index with only one of all possible bands for partitioned indexing
+            let uband_id: usize = band_id.try_into().unwrap();
+            let (start, end) = (uband_id * band_width, (uband_id + 1) * band_width);
+            bands.push(MinHashBand::<T, usize, VecContainer<usize>>::new(start, end, build_hasher.clone()));
+        }
+        Self {
+            bands,
+            threshold: jaccard_threshold,
+            b: num_bands,
+            r: band_width,
+            num_hashes: num_bands * band_width,
+            size: 0,
+        }
+
+    }
+
+    /// Creates new MinHashDeduper with specified `initial_capacity` and `expected_similarity_ratio`,
+    /// which is the expected ratio of similar documents to the total.
+    /// `MinHashDeduper` stores signatures in bands, such that similar signatures locate in
+    /// the same location within the band. The size of the band in inversely proportional to
+    /// the similarity ratio.
+    /// For example with similarity ratio 0.9 the band size on average will be 0.1 of the total
+    /// number of signatures.
+    pub fn new_with_capacity(num_bands: usize, band_width: usize,
+                             jaccard_threshold: f64,
+                             initial_capacity: usize,
+                             expected_similarity_ratio: f64) -> Self {
+        let mut bands = Vec::new();
+        let build_hasher = RandomState::new();
+
+        let band_capacity = (initial_capacity as f64 * (1.0 - expected_similarity_ratio)) as usize;
+        for i in 0..num_bands {
+            let (start, end) = (i * band_width, (i + 1) * band_width);
+            bands.push(MinHashBand::<T, usize, VecContainer<usize>>::new_with_capacity(start, end, band_capacity, build_hasher.clone()));
+        }
+        Self {
+            bands,
+            threshold: jaccard_threshold,
+            b: num_bands,
+            r: band_width,
+            num_hashes: num_bands * band_width,
+            size: 0,
+        }
+
+    }
+
+
+    #[inline]
+    pub fn insert(&mut self, id: usize, signature: Vec<T>) {
+        assert_eq!(self.num_hashes(), signature.len());
+        for band in &mut self.bands {
+            band.insert(id.clone(), &signature);
+        }
+        self.size += 1;
+    }
+
+    pub fn par_bulk_insert(&mut self, ids: Vec<usize>, signatures: Vec<Vec<T>>)
+    where T: Send + Sync,
+    {
+        if !signatures.is_empty() {
+            assert_eq!(self.num_hashes(), signatures[0].len());
+        }
+
+        self.bands.par_iter_mut().for_each(|band| {
+            for item in signatures.iter().zip(ids.iter()) {
+                let hashes = item.0;
+                let id = item.1.clone();
+                band.insert(id, hashes);
+            }
+        });
+        self.size += ids.len();
+    }
+
+    pub fn par_bulk_insert_pairs(&mut self, id_signature_pairs: Vec<(usize, Vec<T>)>)
+    where T: Send + Sync,
+    {
+        self.bands.par_iter_mut().for_each(|band| {
+            for item in id_signature_pairs.iter() {
+                let i: &(usize, Vec<T>) = item;
+                let (a, b) = i;
+                let k: usize = a.clone();
+                band.insert(k, b);
+            }
+        });
+        self.size += id_signature_pairs.len();
+    }
+
+    pub fn shrink_to_fit(&mut self)
+    where T: Send + Sync
+    {
+        self.bands.par_iter_mut()
+            .for_each(|band| band.shrink_to_fit());
+    }
+
+    pub fn shrink_to(&mut self, min_capacity: usize)
+        where T: Send + Sync
+    {
+        self.bands.par_iter_mut()
+            .for_each(|band| {
+                band.shrink_to(min_capacity)
+            });
+    }
+
+
+    pub fn clear(&mut self) {
+        self.bands.iter_mut().for_each(|band| band.clear());
+        self.size = 0;
+    }
+
+    pub fn query(&self, query_signature: &Vec<T>) -> HashSet<&usize> {
+        assert_eq!(self.num_hashes(), query_signature.len());
+        let mut match_ids = HashSet::with_capacity(10);
+        for band in &self.bands {
+            band.query(query_signature, &mut match_ids);
+        }
+
+        match_ids
+    }
+
+    pub fn query_owned(&self, query_signature: &Vec<T>) -> HashSet<usize> {
+        assert_eq!(self.num_hashes(), query_signature.len());
+        let mut match_ids = HashSet::with_capacity(10);
+        for band in &self.bands {
+            band.query_to_owned(query_signature, &mut match_ids);
+        }
+        match_ids
+    }
+
+    pub fn par_bulk_query(&self, signatures: &Vec<Vec<T>>) -> Vec<HashSet<usize>>
+        where
+            T: Send + Sync
+    {
+        signatures.par_iter()
+            .map(|signature| self.query_owned(signature))
+            .collect()
+    }
+
+    pub fn find_clusters(&self) -> UnionFind {
+        let mut uf = UnionFind::new(self.size());
+
+        // Compute unionfind components visiting each band cluster
+        for band in &self.bands {
+            for (_, cluster) in &band.hash_table {
+                if cluster.len() <= 1 {
+                    continue
+                }
+                // We set all elements in the cluster as duplicates of the first element
+                // as the first will be an arbitrary element
+                let first = cluster.vec[0];
+                for elem in &cluster.vec {
+                    uf.union(first, *elem);
+                }
+            }
+        }
+        uf
+    }
+
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    //TODO min or max of all bands capacity?
+    //pub fn capacity(&self) -> usize {
+    //    self.id_signatures.capacity()
+    //}
+
+    pub fn num_hashes(&self) -> usize {
+        self.num_hashes
+    }
+
+    fn band_range(&self, band_index: usize) -> Range<usize> {
+        band_index * self.r..(band_index + 1) * self.r
+    }
+
+    pub fn band_sizes(&self) -> BandStats {
+        let band_sizes: Vec<_> = self.bands.iter()
+            .map(|band| band.hash_table.len())
+            .collect();
+        let max_size = band_sizes.iter().max().unwrap();
+        let min_size = band_sizes.iter().min().unwrap();
+        BandStats {
+            min_size: *min_size,
+            max_size: *max_size,
+            sizes: band_sizes
+        }
+    }
+
+}
 
 #[derive(Debug)]
 pub struct BandStats {
