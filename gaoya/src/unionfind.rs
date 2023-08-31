@@ -33,7 +33,13 @@ impl UnionFind {
         }
         let par_x = self.find(x);
         let par_y = self.find(y);
-        self.parents[par_y] = par_x;
+
+        // The lowest always the parent
+        if par_x > par_y {
+            self.parents[par_x] = par_y;
+        } else {
+            self.parents[par_y] = par_x;
+        }
     }
 }
 
@@ -48,16 +54,17 @@ mod tests {
         uf.union(3,2);
         uf.union(4,2);
 
-        assert_eq!(uf.parents, [0, 1, 3, 4, 4, 5]);
+        assert_eq!(uf.parents, [0, 1, 2, 2, 2, 5]);
     }
 
     #[test]
     fn union_find_path_compression() {
-        let mut uf = UnionFind::new(6);
-        uf.union(3,2);
+        let mut uf = UnionFind::new(10);
+        uf.union(2,8);
         uf.union(4,2);
+        uf.union(1,2);
 
-        assert_eq!(uf.find(2), 4);
-        assert_eq!(uf.parents, [0, 1, 4, 4, 4, 5]);
+        assert_eq!(uf.find(4), 1);
+        assert_eq!(uf.parents, [0, 1, 1, 3, 1, 5, 6, 7, 2, 9]);
     }
 }
